@@ -80,7 +80,7 @@ class ConcurrentYoutubeDLFetcher(BaseYoutubeDLFetcher):
             info (str | None): Short name for the type of data being fetched (for logging).
             description (str | None): Description text for the tqdm progress bar.
         """
-        self.video_ids = video_ids
+        self.video_ids = map(YoutubeVideoID, video_ids)
         self.info = info
         self.description = description
     
@@ -182,18 +182,15 @@ class ChannelFetcher(BaseYoutubeDLFetcher):
                 Options: 'videos', 'shorts', or 'streams'. Defaults to 'videos'.
         """
         super().__init__(max_results)
-        self.channel_handle = channel_handle
+        self.channel_handle = ChannelId(channel_handle.strip())
         self.tab = tab
-
-        if "https://" in channel_handle:
-            self.channel_handle = self._find_channel_handle_from_url(channel_handle)
 
     def fetch(self) -> list[DLSnippet]:
         ydl_opts = self._setup_ydl_opts()
         if self.max_results is not None:
             ydl_opts["playlistend"] = self.max_results
 
-        url = f"https://www.youtube.com/@{self.channel_handle.replace('@', '').strip()}/{self.tab}"
+        url = self.channel_handle.as_tabbed_url(self.tab)
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl: #type: ignore[arg-type]
@@ -205,28 +202,16 @@ class ChannelFetcher(BaseYoutubeDLFetcher):
             msg = str(e).lower()
 
             if "unable to download" in msg or "not found" in msg:
-                raise ChannelNotFound(channel_handle=self.channel_handle) from None
+                raise ChannelNotFound(channel_handle=self.channel_handle.as_url()) from None
             elif "does not have a streams tab" in msg:
-                raise ChannelTabUnavailable(channel_handle=self.channel_handle, tab=self.tab) from None
+                raise ChannelTabUnavailable(channel_handle=self.channel_handle.as_url(), tab=self.tab) from None
 
-            logger.debug(f'Full yt-dlp error for channel: {self.channel_handle}', exc_info=True)
-            raise ChannelFetchError(f"Failed to fetch channel '{self.channel_handle}'") from e
+            logger.debug(f'Full yt-dlp error for channel: {self.channel_handle.}', exc_info=True)
+            raise ChannelFetchError(f"Failed to fetch channel '{self.channel_handle.id}'") from e
         
         except Exception as e:
-            logger.debug(f"Critical internal yt-dlp error for channel: {self.channel_handle}", exc_info=True)
-            raise ChannelFetchError(f"Unexpected internal error while fetching '{self.channel_handle}'") from e
-
-    @staticmethod
-    def _find_channel_handle_from_url(url: str) -> str:
-        """Extract the channel handle from a full YouTube channel URL."""
-        logger.debug("Extracting channel handle from URL...")
-        parsed = urlparse(url)
-        path = parsed.path
-        if "@" in path:
-            handle = path.split("@", 1)[1].split("/")[0]
-            return handle.strip()
-        raise ChannelFetchError(f"Could not extract channel handle from URL: {url}")
-
+            logger.debug(f"Critical internal yt-dlp error for channel: {self.channel_handle.id}", exc_info=True)
+            raise ChannelFetchError(f"Unexpected internal error while fetching '{self.channel_handle.id}'") from e
 
 class PlaylistFetcher(BaseYoutubeDLFetcher):
     """
